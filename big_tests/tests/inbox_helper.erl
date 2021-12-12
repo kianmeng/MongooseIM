@@ -176,6 +176,12 @@ check_inbox(Client, Convs, QueryOpts) ->
                   QueryOpts :: inbox_query_params(),
                   CheckOpts :: inbox_check_params()) -> ok | no_return().
 check_inbox(Client, Convs, QueryOpts, CheckOpts) ->
+    {ok, Res} = mongoose_helper:wait_until(
+                  fun() -> do_check_inbox(Client, Convs, QueryOpts, CheckOpts) end,
+                  ok, #{name => inbox_size, validator => fun(_) -> true end}),
+    Res.
+
+do_check_inbox(Client, Convs, QueryOpts, CheckOpts) ->
     ExpectedSortedConvs = case maps:get(order, QueryOpts, undefined) of
                               asc -> lists:reverse(Convs);
                               _ -> Convs
@@ -240,12 +246,32 @@ get_inbox(Client, ExpectedResult) ->
                 ExpectedResult :: inbox_result_params()) -> [exml:element()].
 get_inbox(Client, GetParams, #{count := ExpectedCount} = ExpectedResult) ->
     GetInbox = make_inbox_stanza(GetParams),
-    escalus:send(Client, GetInbox),
-    Stanzas = escalus:wait_for_stanzas(Client, ExpectedCount),
-    ResIQ = escalus:wait_for_stanza(Client),
+    Validator = fun(#{respond_messages := Val}) -> ExpectedCount =:= length(Val) end,
+    {ok, Inbox} = mongoose_helper:wait_until(
+                    fun() -> do_get_inbox(Client, GetInbox) end,
+                    ExpectedCount, #{validator => Validator, name => inbox_size}),
+    #{respond_iq := ResIQ, respond_messages := Stanzas} = Inbox,
     ?assert(escalus_pred:is_iq_result(GetInbox, ResIQ)),
     check_result(ResIQ, ExpectedResult),
     Stanzas.
+
+
+do_get_inbox(Client, GetInbox) ->
+    escalus:send(Client, GetInbox),
+    [ResIQ | Messages] = lists:reverse(receive_inbox(Client, GetInbox)),
+    #{respond_iq => ResIQ,
+      respond_messages => lists:reverse(Messages)}.
+
+receive_inbox(Client, GetInbox) ->
+    S = escalus:wait_for_stanza(Client),
+    case escalus_pred:is_iq_error(GetInbox, S) of
+        true -> ct:fail("Unexpected error IQ: ~p", [S]);
+        false -> ok
+    end,
+    case escalus_pred:is_iq_result(GetInbox, S) of
+        true  -> [S];
+        false -> [S | receive_inbox(Client, GetInbox)]
+    end.
 
 get_unread_count(Msg) ->
     [Val] = exml_query:paths(Msg, [{element, <<"result">>}, {attr, <<"unread">>}]),
