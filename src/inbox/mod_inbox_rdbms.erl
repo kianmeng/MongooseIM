@@ -16,6 +16,7 @@
          init/2,
          set_inbox/6,
          set_inbox_incr_unread/5,
+         set_inbox_incr_unread/6,
          reset_unread/3,
          remove_inbox_row/2,
          remove_domain/2,

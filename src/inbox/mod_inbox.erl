@@ -122,7 +122,10 @@ supported_features() ->
 config_spec() ->
     Markers = mongoose_chat_markers:chat_marker_names(),
     #section{
-        items = #{<<"reset_markers">> => #list{items = #option{type = binary,
+        items = #{<<"backend">> => #option{type = atom,
+                                           validate = {enum, [rdbms, rdbms_async]}},
+                  <<"async_writer">> => mongoose_async_pools:config_spec(),
+                  <<"reset_markers">> => #list{items = #option{type = binary,
                                                                validate = {enum, Markers}}},
                   <<"groupchat">> => #list{items = #option{type = atom,
                                                            validate = {enum, [muc, muclight]}}},
