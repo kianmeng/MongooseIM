@@ -11,8 +11,8 @@
 -export([
          skip_or_run_inbox_tests/1,
          maybe_run_in_parallel/1,
-         inbox_opts/0,
-         inbox_modules/0,
+         inbox_opts/1,
+         inbox_modules/1,
          muclight_modules/0,
          clear_inbox_all/0,
          foreach_check_inbox/4,
@@ -117,8 +117,17 @@ inbox_ns() ->
 inbox_ns_conversation() ->
     ?NS_ESL_INBOX_CONVERSATION.
 
-inbox_opts() ->
+inbox_opts(regular) ->
     [{aff_changes, true},
+     {remove_on_kicked, true},
+     {groupchat, [muclight]},
+     {reset_markers, [<<"displayed">>]}];
+inbox_opts(async_pools) ->
+    [{backend, rdbms_async},
+     {flush_interval, 100},
+     {batch_size, 5},
+     {pool_size, 4},
+     {aff_changes, true},
      {remove_on_kicked, true},
      {groupchat, [muclight]},
      {reset_markers, [<<"displayed">>]}].
@@ -141,14 +150,18 @@ maybe_run_in_parallel(Gs) ->
 insert_parallels(Gs) ->
     Fun = fun({muclight_config, Conf, Tests}) ->
                   {muclight_config, Conf, Tests};
+             ({regular, Conf, Tests}) ->
+                  {regular, Conf, Tests};
+             ({async_pools, Conf, Tests}) ->
+                  {async_pools, Conf, Tests};
              ({Group, Conf, Tests}) ->
                   {Group, [parallel | Conf], Tests}
           end,
     lists:map(Fun, Gs).
 
-inbox_modules() ->
+inbox_modules(Backend) ->
     [
-     {mod_inbox, inbox_opts()}
+     {mod_inbox, inbox_opts(Backend)}
     ].
 
 muclight_modules() ->
