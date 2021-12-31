@@ -67,16 +67,17 @@ init(HostType, _Options) ->
         UniqueKeyFields = [<<"luser">>, <<"lserver">>, <<"remote_bare_jid">>],
     InsertFields =
         UniqueKeyFields ++ [<<"content">>, <<"unread_count">>, <<"msg_id">>, <<"timestamp">>],
+    CondIncrTimestamp = [<<" WHERE inbox.timestamp <= ? ">>],
     rdbms_queries:prepare_upsert(HostType, inbox_upsert, inbox,
                                  InsertFields,
                                  [<<"content">>, <<"unread_count">>,
                                   <<"msg_id">>, <<"timestamp">>, <<"archive">>],
-                                 UniqueKeyFields),
+                                 UniqueKeyFields, CondIncrTimestamp),
     rdbms_queries:prepare_upsert(HostType, inbox_upsert_incr_unread, inbox,
                                  InsertFields,
                                  [<<"content">>, <<"unread_count = inbox.unread_count + 1">>,
                                   <<"msg_id">>, <<"timestamp">>, <<"archive">>],
-                                 UniqueKeyFields),
+                                 UniqueKeyFields, CondIncrTimestamp),
     ok.
 
 -spec get_inbox(HostType :: mongooseim:host_type(),
@@ -115,7 +116,7 @@ set_inbox(HostType, {LUser, LServer, ToBareJid}, Content, Count, MsgId, Timestam
     UpdateParams = [Content, Count, MsgId, Timestamp, false],
     UniqueKeyValues  = [LUser, LServer, LToBareJid],
     Res = rdbms_queries:execute_upsert(HostType, inbox_upsert,
-                                       InsertParams, UpdateParams, UniqueKeyValues),
+                                       InsertParams, UpdateParams, UniqueKeyValues, [Timestamp]),
     %% MySQL returns 1 when an upsert is an insert
     %% and 2, when an upsert acts as update
     check_result_is_expected(Res, [1, 2]).
@@ -146,7 +147,7 @@ set_inbox_incr_unread(HostType, {LUser, LServer, ToBareJid}, Content, MsgId, Tim
     UpdateParams = [Content, MsgId, Timestamp, false],
     UniqueKeyValues  = [LUser, LServer, LToBareJid],
     Res = rdbms_queries:execute_upsert(HostType, inbox_upsert_incr_unread,
-                                       InsertParams, UpdateParams, UniqueKeyValues),
+                                       InsertParams, UpdateParams, UniqueKeyValues, [Timestamp]),
     check_result(Res).
 
 -spec reset_unread(HosType :: mongooseim:host_type(),

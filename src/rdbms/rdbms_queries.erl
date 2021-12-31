@@ -42,7 +42,9 @@
 
 -export([join/2,
          prepare_upsert/6,
-         execute_upsert/5]).
+         prepare_upsert/7,
+         execute_upsert/5,
+         execute_upsert/6]).
 
 -ignore_xref([
     count_records_where/3, get_db_specific_limits/1, get_db_specific_offset/2, get_db_type/0
@@ -81,11 +83,20 @@ get_db_type() ->
                      UpdateParams :: [any()],
                      UniqueKeyValues :: [any()]) -> mongoose_rdbms:query_result().
 execute_upsert(Host, Name, InsertParams, UpdateParams, UniqueKeyValues) ->
+    execute_upsert(Host, Name, InsertParams, UpdateParams, UniqueKeyValues, []).
+
+-spec execute_upsert(Host :: mongoose_rdbms:server(),
+                     Name :: atom(),
+                     InsertParams :: [any()],
+                     UpdateParams :: [any()],
+                     UniqueKeyValues :: [any()],
+                     any()) -> mongoose_rdbms:query_result().
+execute_upsert(Host, Name, InsertParams, UpdateParams, UniqueKeyValues, Extra) ->
     case {mongoose_rdbms:db_engine(Host), mongoose_rdbms:db_type()} of
         {mysql, _} ->
             mongoose_rdbms:execute(Host, Name, InsertParams ++ UpdateParams);
         {pgsql, _} ->
-            mongoose_rdbms:execute(Host, Name, InsertParams ++ UpdateParams);
+            mongoose_rdbms:execute(Host, Name, InsertParams ++ UpdateParams ++ Extra);
         {odbc, mssql} ->
             mongoose_rdbms:execute(Host, Name, UniqueKeyValues ++ InsertParams ++ UpdateParams);
         NotSupported -> erlang:error({rdbms_not_supported, NotSupported})
@@ -102,7 +113,18 @@ execute_upsert(Host, Name, InsertParams, UpdateParams, UniqueKeyValues) ->
                      UniqueKeyFields :: [binary()]) ->
     {ok, QueryName :: atom()} | {error, already_exists}.
 prepare_upsert(Host, Name, Table, InsertFields, Updates, UniqueKeyFields) ->
-    SQL = upsert_query(Host, Table, InsertFields, Updates, UniqueKeyFields),
+    prepare_upsert(Host, Name, Table, InsertFields, Updates, UniqueKeyFields, []).
+
+-spec prepare_upsert(Host :: mongoose_rdbms:server(),
+                     QueryName :: atom(),
+                     TableName :: atom(),
+                     InsertFields :: [binary()],
+                     Updates :: [binary() | {binary(), binary()}],
+                     UniqueKeyFields :: [binary()],
+                     ConditionsOnUpdate :: [binary()]) ->
+    {ok, QueryName :: atom()} | {error, already_exists}.
+prepare_upsert(Host, Name, Table, InsertFields, Updates, UniqueKeyFields, CondOnUpdate) ->
+    SQL = upsert_query(Host, Table, InsertFields, Updates, UniqueKeyFields, CondOnUpdate),
     Query = iolist_to_binary(SQL),
     ?LOG_DEBUG(#{what => rdbms_upsert_query, query => Query}),
     Fields = prepared_upsert_fields(InsertFields, Updates, UniqueKeyFields),
@@ -116,12 +138,12 @@ prepared_upsert_fields(InsertFields, Updates, UniqueKeyFields) ->
         _ -> InsertFields ++ UpdateFields
     end.
 
-upsert_query(Host, Table, InsertFields, Updates, UniqueKeyFields) ->
+upsert_query(Host, Table, InsertFields, Updates, UniqueKeyFields, CondOnUpdate) ->
     case {mongoose_rdbms:db_engine(Host), mongoose_rdbms:db_type()} of
         {mysql, _} ->
             upsert_mysql_query(Table, InsertFields, Updates, UniqueKeyFields);
         {pgsql, _} ->
-            upsert_pgsql_query(Table, InsertFields, Updates, UniqueKeyFields);
+            upsert_pgsql_query(Table, InsertFields, Updates, UniqueKeyFields, CondOnUpdate);
         {odbc, mssql} ->
             upsert_mssql_query(Table, InsertFields, Updates, UniqueKeyFields);
         NotSupported -> erlang:error({rdbms_not_supported, NotSupported})
@@ -141,9 +163,9 @@ upsert_mysql_query(Table, InsertFields, Updates, [Key | _]) ->
     OnConflict = mysql_on_conflict(Updates, Key),
     [Insert, OnConflict].
 
-upsert_pgsql_query(Table, InsertFields, Updates, UniqueKeyFields) ->
+upsert_pgsql_query(Table, InsertFields, Updates, UniqueKeyFields, CondOnUpdate) ->
     Insert = mysql_and_pgsql_insert(Table, InsertFields),
-    OnConflict = pgsql_on_conflict(Updates, UniqueKeyFields),
+    OnConflict = pgsql_on_conflict(Updates, UniqueKeyFields, CondOnUpdate),
     [Insert, OnConflict].
 
 mysql_on_conflict([], Key) ->
@@ -153,14 +175,14 @@ mysql_on_conflict(UpdateFields, _) ->
     [" ON DUPLICATE KEY UPDATE ",
      update_fields_on_conflict(UpdateFields)].
 
-pgsql_on_conflict([], UniqueKeyFields) ->
+pgsql_on_conflict([], UniqueKeyFields, _) ->
     JoinedKeys = join(UniqueKeyFields, ", "),
     [" ON CONFLICT (", JoinedKeys, ") DO NOTHING"];
-pgsql_on_conflict(UpdateFields, UniqueKeyFields) ->
+pgsql_on_conflict(UpdateFields, UniqueKeyFields, CondOnUpdate) ->
     JoinedKeys = join(UniqueKeyFields, ", "),
     [" ON CONFLICT (", JoinedKeys, ")"
      " DO UPDATE SET ",
-     update_fields_on_conflict(UpdateFields)].
+     update_fields_on_conflict(UpdateFields)] ++ CondOnUpdate.
 
 update_fields_on_conflict(Updates) ->
     FieldsWithPlaceHolders = [update_field_expression(Update) || Update <- Updates],
