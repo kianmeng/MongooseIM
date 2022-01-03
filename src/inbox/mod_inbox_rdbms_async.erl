@@ -5,6 +5,10 @@
 
 -behaviour(mod_inbox_backend).
 
+-define(PER_MESSAGE_FLUSH_TIME, [?MODULE, per_message_flush_time]).
+-define(FLUSH_TIME, [?MODULE, flush_time]).
+-define(MESSAGES_PER_ENTRY, [?MODULE, messages_per_entry]).
+
 -type async_task() ::
     {set_inbox, mod_inbox:entry_key(), content(), pos_integer(), id(), integer()} |
     {set_inbox_incr_unread, mod_inbox:entry_key(), content(), id(), integer(), Incrs :: pos_integer()} |
@@ -31,6 +35,7 @@ init(HostType, Opts0) ->
     mod_inbox_rdbms:init(HostType, Opts0),
     Opts1 = extend_opts(Opts0),
     start_pool(HostType, Opts1),
+    ensure_metrics(HostType),
     ok.
 
 extend_opts(Opts) ->
@@ -50,9 +55,22 @@ defaults() ->
 start_pool(HostType, Opts) ->
     catch mongoose_async_pools:start_pool(HostType, inbox, Opts).
 
--spec flush_inbox([async_task()], map()) -> ok | {error, term()}.
-flush_inbox(Acc, #{host_type := HostType}) ->
+ensure_metrics(HostType) ->
+    mongoose_metrics:ensure_metric(HostType, ?MESSAGES_PER_ENTRY, histogram),
+    mongoose_metrics:ensure_metric(HostType, ?PER_MESSAGE_FLUSH_TIME, histogram),
+    mongoose_metrics:ensure_metric(HostType, ?FLUSH_TIME, histogram).
+
+-spec flush_inbox([async_task()], mongoose_async_pools:pool_extra()) -> ok | {error, term()}.
+flush_inbox(Acc, Extra = #{host_type := HostType, queue_length := MessageCount}) ->
+    {FlushTime, Result} = timer:tc(fun do_flush_inbox/2, [Acc, Extra]),
+    mongoose_metrics:update(HostType, ?PER_MESSAGE_FLUSH_TIME, round(FlushTime / MessageCount)),
+    mongoose_metrics:update(HostType, ?FLUSH_TIME, FlushTime),
+    Result.
+
+-spec do_flush_inbox([async_task()], mongoose_async_pools:pool_extra()) -> ok | {error, term()}.
+do_flush_inbox(Acc, #{host_type := HostType, queue_length := MessageCount}) ->
     Entries = classify_by_entry(Acc),
+    mongoose_metrics:update(HostType, ?MESSAGES_PER_ENTRY, MessageCount / maps:size(Entries)),
     AccEntries = accumulate_entries(Entries),
     Results = apply_entries(AccEntries, HostType),
     verify_results(Results).
