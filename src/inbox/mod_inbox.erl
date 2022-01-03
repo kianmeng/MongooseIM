@@ -110,6 +110,11 @@ start(HostType, Opts) ->
 -spec stop(HostType :: mongooseim:host_type()) -> ok.
 stop(HostType) ->
     mod_inbox_muc:stop(HostType),
+    Opts = mongoose_config:get_opt([{modules, HostType}, mod_inbox]),
+    case gen_mod:get_opt(backend, Opts, rdbms) of
+        rdbms_async -> mod_inbox_rdbms_async:stop(HostType);
+        _ -> ok
+    end,
     ejabberd_hooks:delete(hooks(HostType)),
     gen_iq_handler:remove_iq_handler_for_domain(HostType, ?NS_ESL_INBOX, ejabberd_sm),
     gen_iq_handler:remove_iq_handler_for_domain(HostType, ?NS_ESL_INBOX_CONVERSATION, ejabberd_sm).

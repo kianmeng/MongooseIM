@@ -27,6 +27,7 @@
          get_inbox_unread/2,
          get_entry_properties/2,
          set_entry_properties/3]).
+-export([stop/1]).
 
 %% Async callback
 -export([flush_inbox/2]).
@@ -37,6 +38,9 @@ init(HostType, Opts) ->
     start_pool(HostType, AsyncOpts),
     ensure_metrics(HostType),
     ok.
+
+stop(HostType) ->
+    mongoose_async_pools:stop_pool(HostType, inbox).
 
 prepare_pool_opts(Opts) ->
     AsyncOpts = gen_mod:get_opt(async_writer, Opts),
