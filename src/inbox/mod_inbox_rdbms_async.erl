@@ -31,26 +31,17 @@
 %% Async callback
 -export([flush_inbox/2]).
 
-init(HostType, Opts0) ->
-    mod_inbox_rdbms:init(HostType, Opts0),
-    Opts1 = extend_opts(Opts0),
-    start_pool(HostType, Opts1),
+init(HostType, Opts) ->
+    mod_inbox_rdbms:init(HostType, Opts),
+    AsyncOpts = prepare_pool_opts(Opts),
+    start_pool(HostType, AsyncOpts),
     ensure_metrics(HostType),
     ok.
 
-extend_opts(Opts) ->
-    Merge = maps:merge(defaults(), maps:from_list(Opts)),
-    Opts1 = maps:to_list(Merge),
-    Opts2 = gen_mod:set_opt(flush_extra, Opts1, Merge),
-    add_callback(Opts2).
-
-add_callback(Opts) ->
-    gen_mod:set_opt(flush_callback, Opts, fun ?MODULE:flush_inbox/2).
-
-defaults() ->
-    #{flush_interval => 500,
-      batch_size => 1000,
-      pool_size => 2 * erlang:system_info(schedulers_online)}.
+prepare_pool_opts(Opts) ->
+    AsyncOpts = gen_mod:get_opt(async_writer, Opts),
+    AsyncOpts1 = gen_mod:set_opt(flush_extra, AsyncOpts, maps:from_list(AsyncOpts)),
+    gen_mod:set_opt(flush_callback, AsyncOpts1, fun ?MODULE:flush_inbox/2).
 
 start_pool(HostType, Opts) ->
     catch mongoose_async_pools:start_pool(HostType, inbox, Opts).

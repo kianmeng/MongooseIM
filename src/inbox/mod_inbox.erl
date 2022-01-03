@@ -121,10 +121,12 @@ supported_features() ->
 -spec config_spec() -> mongoose_config_spec:config_section().
 config_spec() ->
     Markers = mongoose_chat_markers:chat_marker_names(),
+    AsyncWorkers0 = mongoose_async_pools:config_spec(),
+    AsyncWorkers = AsyncWorkers0#section{defaults = async_writer_defaults()},
     #section{
         items = #{<<"backend">> => #option{type = atom,
                                            validate = {enum, [rdbms, rdbms_async]}},
-                  <<"async_writer">> => mongoose_async_pools:config_spec(),
+                  <<"async_writer">> => AsyncWorkers,
                   <<"reset_markers">> => #list{items = #option{type = binary,
                                                                validate = {enum, Markers}}},
                   <<"groupchat">> => #list{items = #option{type = atom,
@@ -134,6 +136,11 @@ config_spec() ->
                   <<"iqdisc">> => mongoose_config_spec:iqdisc()
         }
     }.
+
+async_writer_defaults() ->
+    #{<<"flush_interval">> => 500,
+      <<"batch_size">> => 1000,
+      <<"pool_size">> => 2 * erlang:system_info(schedulers_online)}.
 
 %%%%%%%%%%%%%%%%%%%
 %% Process IQ

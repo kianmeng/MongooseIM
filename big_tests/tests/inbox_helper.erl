@@ -124,9 +124,9 @@ inbox_opts(regular) ->
      {reset_markers, [<<"displayed">>]}];
 inbox_opts(async_pools) ->
     [{backend, rdbms_async},
-     {flush_interval, 100},
-     {batch_size, 5},
-     {pool_size, 4},
+     {async_writer, [{flush_interval, 100},
+                     {batch_size, 5},
+                     {pool_size, 4}]},
      {aff_changes, true},
      {remove_on_kicked, true},
      {groupchat, [muclight]},
