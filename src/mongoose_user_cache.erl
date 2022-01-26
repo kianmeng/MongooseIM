@@ -96,7 +96,7 @@ stop_cache(HostType, Module) ->
 
 -spec cache_name(mongooseim:host_type(), module()) -> atom().
 cache_name(HostType, Module) ->
-    case gen_mod:get_module_opt(HostType, Module, cache_name, internal) of
+    case gen_mod:get_module_opt(HostType, Module, module, internal) of
         internal -> gen_mod:get_module_proc(HostType, Module);
         ConfiguredModule -> gen_mod:get_module_proc(HostType, ConfiguredModule)
     end.
