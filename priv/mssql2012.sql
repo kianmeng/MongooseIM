@@ -686,18 +686,20 @@ CREATE TABLE muc_registered(
 -- from_jid, to_jid and thread have 250 characters in MySQL
 -- but here we are limited by index size (900 bytes)
 CREATE TABLE smart_markers (
-    from_jid NVARCHAR(150) NOT NULL,
-    to_jid NVARCHAR(150) NOT NULL,
-    thread NVARCHAR(145) NOT NULL,
+    lserver VARBINARY(200) NOT NULL,
+    from_luser VARBINARY(250) NOT NULL,
+    to_jid VARBINARY(350) NOT NULL,
+    thread VARBINARY(99) NOT NULL,
     -- chat marker types:
     -- 'R' - received
     -- 'D' - displayed
     -- 'A' - acknowledged
-    type NVARCHAR(1) NOT NULL,
-    msg_id NVARCHAR(250) NOT NULL,
+    type CHAR(1) NOT NULL,
+    msg_id VARBINARY(250) NOT NULL,
     timestamp BIGINT NOT NULL,
     CONSTRAINT pk_smart_markers PRIMARY KEY CLUSTERED(
-            from_jid ASC,
+            lserver ASC,
+            from_luser ASC,
             to_jid ASC,
             thread ASC,
             type ASC
