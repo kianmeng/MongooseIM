@@ -147,15 +147,15 @@ end_per_testcase(CaseName, Config) ->
 %% Module configuration per group
 
 required_modules(GroupName) ->
-    [{mod_bosh, required_bosh_opts(GroupName)}].
+    [{mod_bosh, maps:merge(config_parser_helper:default_mod_config(mod_bosh),
+                           required_bosh_opts(GroupName))}].
 
 required_bosh_opts(time) ->
-    [{max_wait, ?MAX_WAIT},
-     {inactivity, ?INACTIVITY}];
+    #{max_wait => ?MAX_WAIT, inactivity => ?INACTIVITY};
 required_bosh_opts(server_acks) ->
-    [{server_acks, true}];
+    #{server_acks => true};
 required_bosh_opts(_Group) ->
-    [].
+    #{}.
 
 %%--------------------------------------------------------------------
 %% Tests

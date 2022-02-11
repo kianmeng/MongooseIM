@@ -1603,20 +1603,21 @@ mod_auth_token(_Config) ->
     ?errh(T(#{<<"access">> => #{<<"unit">> => <<"days">>}})).
 
 mod_bosh(_Config) ->
+    check_module_defaults(mod_bosh),
+    P = [modules, mod_bosh],
     T = fun(K, V) -> #{<<"modules">> => #{<<"mod_bosh">> => #{K => V}}} end,
-    M = fun(K, V) -> modopts(mod_bosh, [{K, V}]) end,
-    ?cfgh(M(inactivity, 10), T(<<"inactivity">>, 10)),
-    ?cfgh(M(inactivity, infinity), T(<<"inactivity">>, <<"infinity">>)),
-    ?cfgh(M(inactivity, 10), T(<<"inactivity">>, 10)),
-    ?cfgh(M(max_wait, infinity), T(<<"max_wait">>, <<"infinity">>)),
-    ?cfgh(M(server_acks, true), T(<<"server_acks">>, true)),
-    ?cfgh(M(server_acks, false), T(<<"server_acks">>, false)),
-    ?cfgh(M(maxpause, 10), T(<<"max_pause">>, 10)),
-    ?errh(T(<<"inactivity">>, -1)),
+    ?cfgh(P ++ [inactivity], 10, T(<<"inactivity">>, 10)),
+    ?cfgh(P ++ [inactivity], infinity, T(<<"inactivity">>, <<"infinity">>)),
+    ?cfgh(P ++ [max_wait], 10, T(<<"max_wait">>, 10)),
+    ?cfgh(P ++ [max_wait], infinity, T(<<"max_wait">>, <<"infinity">>)),
+    ?cfgh(P ++ [server_acks], true, T(<<"server_acks">>, true)),
+    ?cfgh(P ++ [server_acks], false, T(<<"server_acks">>, false)),
+    ?cfgh(P ++ [max_pause], 10, T(<<"max_pause">>, 10)),
+    ?errh(T(<<"inactivity">>, 0)),
     ?errh(T(<<"inactivity">>, <<"10">>)),
     ?errh(T(<<"inactivity">>, <<"inactivity">>)),
     ?errh(T(<<"max_wait">>, <<"10">>)),
-    ?errh(T(<<"max_wait">>, -1)),
+    ?errh(T(<<"max_wait">>, 0)),
     ?errh(T(<<"server_acks">>, -1)),
     ?errh(T(<<"maxpause">>, 0)).
 
