@@ -13,7 +13,7 @@ If you want to use BOSH, you must enable it both in the `listen` section of
  * **Default:** `30`
  * **Example:** `inactivity = 30`
  
-Maximum allowed inactivity time for a BOSH connection.
+Maximum allowed inactivity time (in seconds) for a BOSH connection.
 Please note that a long-polling request is not considered to be an inactivity.
 
 ### `modules.mod_bosh.max_wait`
