@@ -23,6 +23,8 @@ Strategy to handle incoming IQ requests. For details, please refer to
 
 This indicates if a message sent by a user should be implicitly considered as marking itself. Often, a user sending a message implicitly means the user has entered the chat and read the previous ones, so in many deployments this will probably be desired.
 
+Note that, as described in [Usage within MUC](https://xmpp.org/extensions/xep-0333.html#rules-muc), if the room supports [Unique and Stable Stanza IDs (XEP-0359)](https://xmpp.org/extensions/xep-0359.html), markers should use the room's assigned `<stanza-id>` as the ID for chat markers. This server will implement exactly that case.
+
 ### `modules.mod_smart_markers.keep_private`
 * **Syntax:** boolean
 * **Default:** `false`
