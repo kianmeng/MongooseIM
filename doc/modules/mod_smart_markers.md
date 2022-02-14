@@ -1,14 +1,10 @@
 ## Module Description
 
-Smart markers are an experimental feature, described in detail as our [Open XMPP Extension](../open-extensions/smart-markers.md).
+Smart markers are an experimental feature, described in detail as our [Open XMPP Extension for markers](../open-extensions/smart-markers.md).
 
 ## Options
 
 ### `modules.mod_smart_markers.iqdisc`
-* **Syntax:** array of strings, out of `"displayed"`, `"received"`, `"acknowledged"`
-* **Default:** `["displayed"]`
-* **Example:** `reset_markers = ["received"]`
-
 * **Syntax:** string, one of `"one_queue"`, `"no_queue"`, `"queues"`, `"parallel"`
 * **Default:** `"no_queue"`
 
@@ -20,12 +16,29 @@ Strategy to handle incoming IQ requests. For details, please refer to
 * **Default:** `"rdbms"`
 * **Example:** `backend = "rdbms"`
 
+### `modules.mod_smart_markers.message_as_implicit_marker`
+* **Syntax:** boolean
+* **Default:** `false`
+* **Example:** `message_as_implicit_marker = true`
+
+This indicates if a message sent by a user should be implicitly considered as marking itself. Often, a user sending a message implicitly means the user has entered the chat and read the previous ones, so in many deployments this will probably be desired.
+
+### `modules.mod_smart_markers.keep_private`
+* **Syntax:** boolean
+* **Default:** `false`
+* **Example:** `keep_private = true`
+
+This indicates if markers are meant to be private to the sender of the marker (setting `keep_private` as `true`), or if they can be public.
+
+By default markers are public to the conversation where they are sent, so they'll be routed to all recipients, and anyone in the chat can see where its peers are at any time, i.e., the Facebook Messenger model; but they can be configured private, so markers won't be routed to anyone, and a user who fetches their status will only receive information for markers they have sent alone, i.e., the Slack model.
+
 ## Example configuration
 
 ```toml
 [modules.mod_smart_markers]
   backend = "rdbms"
   iqdisc = "parallel"
+  message_as_implicit_marker = true
 ```
 
 ## Implementation details
