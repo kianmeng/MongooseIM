@@ -2,6 +2,7 @@
 -compile([export_all, nowarn_export_all]).
 
 -include("muc_light.hrl").
+-define(NS_ESL_SMART_MARKERS, <<"esl:xmpp:smart-markers:0">>).
 
 -import(distributed_helper, [mim/0, rpc/4, subhost_pattern/1]).
 -import(domain_helper, [host_type/0]).
@@ -24,6 +25,10 @@ groups() ->
     [
      {one2one, [],
       [
+       error_set_iq,
+       error_bad_peer,
+       error_no_peer_given,
+       error_bad_timestamp,
        marker_is_stored,
        remove_markers_when_removed_user
       ]},
@@ -70,6 +75,40 @@ end_per_testcase(Name, Config) ->
     escalus:end_per_testcase(Name, Config).
 
 %%% tests
+error_set_iq(Config) ->
+    escalus:fresh_story(Config, [{alice, 1}], fun(Alice) ->
+        Query = escalus_stanza:query_el(?NS_ESL_SMART_MARKERS, []),
+        Iq = escalus_stanza:iq(<<"set">>, [Query]),
+        escalus:send(Alice, Iq),
+        Response = escalus:wait_for_stanza(Alice),
+        escalus:assert(is_iq_error, [Iq], Response)
+    end).
+
+error_bad_peer(Config) ->
+    escalus:fresh_story(Config, [{alice, 1}], fun(Alice) ->
+        Iq = iq_fetch_marker([{<<"peer">>, <<"/@">>}]),
+        escalus:send(Alice, Iq),
+        Response = escalus:wait_for_stanza(Alice),
+        escalus:assert(is_iq_error, [Iq], Response)
+    end).
+
+error_no_peer_given(Config) ->
+    escalus:fresh_story(Config, [{alice, 1}], fun(Alice) ->
+        Iq = iq_fetch_marker([]),
+        escalus:send(Alice, Iq),
+        Response = escalus:wait_for_stanza(Alice),
+        escalus:assert(is_iq_error, [Iq], Response)
+    end).
+
+error_bad_timestamp(Config) ->
+    escalus:fresh_story(Config, [{alice, 1}], fun(Alice) ->
+        PeerJid = <<"peer@localhost">>,
+        Iq = iq_fetch_marker([{<<"peer">>, PeerJid}, {<<"after">>, <<"baddate">>}]),
+        escalus:send(Alice, Iq),
+        Response = escalus:wait_for_stanza(Alice),
+        escalus:assert(is_iq_error, [Iq], Response)
+    end).
+
 marker_is_stored(Config) ->
     escalus:fresh_story(Config, [{alice, 1}, {bob, 1}], fun(Alice, Bob) ->
         send_message_respond_marker(Alice, Bob),
@@ -149,6 +188,10 @@ fetch_markers_for_users(From, To) ->
     MRs = rpc(mim(), mod_smart_markers_backend, get_chat_markers,
               [host_type(), To, undefined, 0]),
     [MR || #{from := FR} = MR <- MRs, jid:are_bare_equal(From, FR)].
+
+iq_fetch_marker(Attrs) ->
+    Query = escalus_stanza:query_el(?NS_ESL_SMART_MARKERS, Attrs, []),
+    escalus_stanza:iq(<<"get">>, [Query]).
 
 create_room(Owner, Members, Config) ->
     RoomId = muc_helper:fresh_room_name(),
