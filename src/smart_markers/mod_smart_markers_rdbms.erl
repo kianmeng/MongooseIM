@@ -11,6 +11,7 @@
 -include("jlib.hrl").
 
 -export([init/2, update_chat_marker/2, get_chat_markers/4]).
+-export([get_conv_chat_marker/5]).
 -export([remove_domain/2, remove_user/2, remove_to/2, remove_to_for_user/3]).
 
 %%--------------------------------------------------------------------
@@ -23,6 +24,10 @@ init(HostType, _) ->
     InsertFields = KeyFields ++ UpdateFields,
     rdbms_queries:prepare_upsert(HostType, smart_markers_upsert, smart_markers,
                                  InsertFields, UpdateFields, KeyFields),
+    mongoose_rdbms:prepare(smart_markers_select_conv, smart_markers,
+        [lserver, from_luser, to_jid, thread, timestamp],
+        <<"SELECT thread, type, msg_id, timestamp FROM smart_markers "
+          "WHERE lserver = ? AND from_luser = ? AND to_jid = ? AND thread = ? AND timestamp >= ?">>),
     mongoose_rdbms:prepare(smart_markers_select, smart_markers,
         [to_jid, thread, timestamp],
         <<"SELECT lserver, from_luser, type, msg_id, timestamp FROM smart_markers "
@@ -58,6 +63,24 @@ update_chat_marker(HostType, #{from := #jid{luser = LU, lserver = LS},
     Res = rdbms_queries:execute_upsert(HostType, smart_markers_upsert,
                                        InsertValues, UpdateValues, KeyValues),
     ok = check_upsert_result(Res).
+
+-spec get_conv_chat_marker(HostType :: mongooseim:host_type(),
+                           From :: jid:jid(),
+                           To :: jid:jid(),
+                           Thread :: mod_smart_markers:maybe_thread(),
+                           Timestamp :: integer()) -> [mod_smart_markers:chat_marker()].
+get_conv_chat_marker(HostType, From = #jid{luser = LU, lserver = LS}, To, Thread, TS) ->
+    {selected, ChatMarkers} = mongoose_rdbms:execute_successfully(
+                                HostType, smart_markers_select_conv,
+                                [LS, LU, encode_jid(To), encode_thread(Thread), TS]),
+    [ #{from => From,
+        to => To,
+        thread => decode_thread(MsgThread),
+        type => decode_type(Type),
+        timestamp => decode_timestamp(MsgTS),
+        id => MsgId}
+      || {MsgThread, Type, MsgId, MsgTS} <- ChatMarkers].
+
 
 %%% @doc
 %%% This function must return the latest chat markers sent to the

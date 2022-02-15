@@ -57,22 +57,21 @@
 
 -include("jlib.hrl").
 -include("mod_muc_light.hrl").
+-include("mongoose_config_spec.hrl").
 
 -xep([{xep, 333}, {version, "0.3"}]).
 -behaviour(gen_mod).
 
 %% gen_mod API
--export([start/2]).
--export([stop/1]).
--export([supported_features/0]).
+-export([start/2, stop/1, supported_features/0, config_spec/0]).
 
-%% gen_mod API
+%% Internal API
 -export([get_chat_markers/3]).
 
 %% Hook handlers
--export([user_send_packet/4, remove_user/3, remove_domain/3,
+-export([process_iq/5, user_send_packet/4, remove_user/3, remove_domain/3,
          forget_room/4, room_new_affiliations/4]).
--ignore_xref([user_send_packet/4, remove_user/3, remove_domain/3,
+-ignore_xref([process_iq/5, user_send_packet/4, remove_user/3, remove_domain/3,
               forget_room/4, room_new_affiliations/4]).
 
 %%--------------------------------------------------------------------
@@ -96,19 +95,98 @@
 -spec start(mongooseim:host_type(), gen_mod:module_opts()) -> any().
 start(HostType, Opts) ->
     mod_smart_markers_backend:init(HostType, Opts),
+    gen_iq_handler:add_iq_handler_for_domain(
+      HostType, ?NS_ESL_SMART_MARKERS, ejabberd_sm,
+      fun ?MODULE:process_iq/5, #{}, no_queue),
     ejabberd_hooks:add(hooks(HostType)).
 
 -spec stop(mongooseim:host_type()) -> ok.
 stop(HostType) ->
+    gen_iq_handler:remove_iq_handler_for_domain(HostType, ?NS_ESL_SMART_MARKERS, ejabberd_sm),
     ejabberd_hooks:delete(hooks(HostType)).
 
 -spec supported_features() -> [atom()].
 supported_features() ->
     [dynamic_domains].
 
+-spec config_spec() -> mongoose_config_spec:config_section().
+config_spec() ->
+    #section{
+       items = #{<<"backend">> => #option{type = binary, validate = {enum, [rdbms]}},
+                 <<"message_as_implicit_marker">> => #option{type = boolean},
+                 <<"keep_private">> => #option{type = boolean},
+                 <<"iqdisc">> => mongoose_config_spec:iqdisc()
+       }
+    }.
+
 %%--------------------------------------------------------------------
 %% Hook handlers
 %%--------------------------------------------------------------------
+
+-spec process_iq(mongoose_acc:t(), jid:jid(), jid:jid(), jlib:iq(), map()) ->
+    {mongoose_acc:t(), jlib:iq()}.
+process_iq(Acc, _From, _To, #iq{type = set, sub_el = SubEl} = IQ, _Extra) ->
+    {Acc, IQ#iq{type = error, sub_el = [SubEl, mongoose_xmpp_errors:not_allowed()]}};
+process_iq(Acc, From, _To, #iq{type = get, sub_el = SubEl} = IQ, _Extra) ->
+    Res = case maps:from_list(SubEl#xmlel.attrs) of
+              #{<<"peer">> := BinPeer, <<"thread">> := Thread, <<"after">> := BinTS} ->
+                  fetch_markers(IQ, Acc, From, jid:from_binary(BinPeer), Thread, parse_ts(BinTS));
+              #{<<"peer">> := BinPeer, <<"thread">> := Thread} ->
+                  fetch_markers(IQ, Acc, From, jid:from_binary(BinPeer), Thread, 0);
+              #{<<"peer">> := BinPeer, <<"after">> := BinTS} ->
+                  fetch_markers(IQ, Acc, From, jid:from_binary(BinPeer), undefined, parse_ts(BinTS));
+              #{<<"peer">> := BinPeer} ->
+                  fetch_markers(IQ, Acc, From, jid:from_binary(BinPeer), undefined, 0);
+              #{} ->
+                  Msg = <<"No peer provided">>,
+                  IQ#iq{type = error, sub_el = [mongoose_xmpp_errors:bad_request(<<"en">>, Msg)]}
+          end,
+    {Acc, Res}.
+
+-spec parse_ts(binary()) -> integer() | error.
+parse_ts(BinTS) ->
+    try calendar:rfc3339_to_system_time(binary_to_list(BinTS))
+    catch error:_Error -> error
+    end.
+
+-spec fetch_markers(jlib:iq(),
+                   mongoose_acc:t(),
+                   jid:jid(),
+                   error | jid:jid(),
+                   maybe_thread(),
+                   error | integer()) -> jlib:iq().
+fetch_markers(IQ, _, _, error, _, _) ->
+    IQ#iq{type = error,
+          sub_el = [mongoose_xmpp_errors:bad_request(<<"en">>, <<"invalid-peer">>)]};
+fetch_markers(IQ, _, _, _, _, error) ->
+    IQ#iq{type = error,
+          sub_el = [mongoose_xmpp_errors:bad_request(<<"en">>, <<"invalid-timestamp">>)]};
+fetch_markers(IQ, Acc, From, Peer, Thread, TS) ->
+    HostType = mongoose_acc:host_type(Acc),
+    Markers = mod_smart_markers_backend:get_conv_chat_marker(HostType, From, Peer, Thread, TS),
+    SubEl = #xmlel{name = <<"query">>,
+                   attrs = [{<<"xmlns">>, ?NS_ESL_SMART_MARKERS},
+                            {<<"peer">>, jid:to_binary(jid:to_lus(Peer))}],
+                   children = build_result(Markers)},
+    IQ#iq{type = result, sub_el = SubEl}.
+
+build_result(Markers) ->
+    [ #xmlel{name = <<"marker">>,
+             attrs = [{<<"id">>, MsgId},
+                      {<<"type">>, atom_to_binary(Type)},
+                      {<<"timestamp">>, ts_to_bin(MsgTS)}
+                      | maybe_thread(MsgThread) ]}
+      || #{thread := MsgThread, type := Type, timestamp := MsgTS, id := MsgId} <- Markers ].
+
+ts_to_bin(TS) ->
+    list_to_binary(calendar:system_time_to_rfc3339(TS, [{offset, "Z"}, {unit, microsecond}])).
+
+maybe_thread(undefined) ->
+    [];
+maybe_thread(Bin) ->
+    [{<<"thread">>, Bin}].
+
+%% @TODO: implement all the other hooks
 -spec hooks(mongooseim:host_type()) -> [ejabberd_hooks:hook()].
 hooks(HostType) ->
     [{user_send_packet, HostType, ?MODULE, user_send_packet, 90},
@@ -147,7 +225,7 @@ forget_room(Acc, HostType, RoomS, RoomU) ->
     mod_smart_markers_backend:remove_to(HostType, jid:make_noprep(RoomU, RoomS, <<>>)),
     Acc.
 
-%% The new affs can be found in the Acc:element, where we can scan for 'none' ones
+%% IDEA 2: the new affs can be found in the Acc:element, where we can scan for 'none' ones
 -spec room_new_affiliations(mongoose_acc:t(), jid:jid(), mod_muc_light:aff_users(), binary()) ->
     mongoose_acc:t().
 room_new_affiliations(Acc, RoomJid, _NewAffs, _NewVersion) ->
@@ -164,6 +242,14 @@ room_new_affiliations(Acc, RoomJid, _NewAffs, _NewVersion) ->
              end || User <- Users ],
             Acc
     end.
+%% IDEA 1: is the user, as extracted from Acc:from_jid, a member of the NewAffs?!
+    % FromJid = mongoose_acc:from_jid(Acc),
+    % case [ US || {US, _} <- NewAffs, jid:are_bare_equal(FromJid, US) ] of
+    %     [] -> Acc;
+    %     [_] ->
+    %         mod_smart_markers_backend:remove_to_for_user(HostType, FromJid, RoomJid),
+    %         Acc
+    % end.
 
 %%--------------------------------------------------------------------
 %% Other API

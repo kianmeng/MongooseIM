@@ -1,6 +1,8 @@
 -module(smart_markers_SUITE).
 -compile([export_all, nowarn_export_all]).
 
+-include_lib("stdlib/include/assert.hrl").
+-include_lib("exml/include/exml.hrl").
 -include("muc_light.hrl").
 -define(NS_ESL_SMART_MARKERS, <<"esl:xmpp:smart-markers:0">>).
 
@@ -30,11 +32,16 @@ groups() ->
        error_no_peer_given,
        error_bad_timestamp,
        marker_is_stored,
+       marker_can_be_fetched,
+       marker_for_thread_can_be_fetched,
+       marker_after_timestamp_can_be_fetched,
+       marker_after_timestamp_for_threadid_can_be_fetched,
        remove_markers_when_removed_user
       ]},
      {muclight, [],
       [
        marker_is_stored_for_room,
+       marker_can_be_fetched_for_room,
        marker_is_removed_when_user_leaves_room,
        markers_are_removed_when_room_is_removed
       ]}
@@ -116,6 +123,82 @@ marker_is_stored(Config) ->
         BobJid = jid:from_binary(escalus_client:full_jid(Bob)),
         mongoose_helper:wait_until(
           fun() -> length(fetch_markers_for_users(BobJid, AliceJid)) > 0 end, true)
+    end).
+
+marker_can_be_fetched(Config) ->
+    escalus:fresh_story(Config, [{alice, 1}, {bob, 1}], fun(Alice, Bob) ->
+        send_message_respond_marker(Alice, Bob),
+        verify_marker_fetch(Bob, Alice),
+        verify_marker_fetch(Alice, Bob)
+    end).
+
+verify_marker_fetch(MarkingUser, MarkedUser) ->
+        MarkedUserBJid = escalus_utils:jid_to_lower(escalus_client:short_jid(MarkedUser)),
+        Iq = iq_fetch_marker([{<<"peer">>, MarkedUserBJid}]),
+        escalus:send(MarkingUser, Iq),
+        Response = escalus:wait_for_stanza(MarkingUser),
+        escalus:assert(is_iq_result, [Iq], Response),
+        Marker = exml_query:path(Response, [{element_with_ns, <<"query">>, ?NS_ESL_SMART_MARKERS},
+                                            {element, <<"marker">>}]),
+        ?assertNotEqual(undefined, Marker),
+        ?assertNotEqual(undefined, exml_query:attr(Marker, <<"timestamp">>)),
+        ?assertEqual(<<"displayed">>, exml_query:attr(Marker, <<"type">>)),
+        ?assertEqual(undefined, exml_query:attr(Marker, <<"thread">>)).
+
+marker_for_thread_can_be_fetched(Config) ->
+    escalus:fresh_story(Config, [{alice, 1}, {bob, 1}], fun(Alice, Bob) ->
+        ThreadId = <<"some-thread-id">>,
+        send_message_respond_marker(Alice, Bob),
+        send_message_respond_marker(Alice, Bob, ThreadId),
+        AliceBJid = escalus_utils:jid_to_lower(escalus_client:short_jid(Alice)),
+        Iq = iq_fetch_marker([{<<"peer">>, AliceBJid}, {<<"thread">>, ThreadId}]),
+        escalus:send(Bob, Iq),
+        Response = escalus:wait_for_stanza(Bob),
+        escalus:assert(is_iq_result, [Iq], Response),
+        Marker = exml_query:path(Response, [{element_with_ns, <<"query">>, ?NS_ESL_SMART_MARKERS},
+                                            {element, <<"marker">>}]),
+        ?assertNotEqual(undefined, Marker),
+        ?assertEqual(<<"displayed">>, exml_query:attr(Marker, <<"type">>)),
+        ?assertEqual(ThreadId, exml_query:attr(Marker, <<"thread">>))
+    end).
+
+marker_after_timestamp_can_be_fetched(Config) ->
+    escalus:fresh_story(Config, [{alice, 1}, {bob, 1}], fun(Alice, Bob) ->
+        TS = rpc(mim(), erlang, system_time, [microsecond]),
+        BinTS = list_to_binary(calendar:system_time_to_rfc3339(TS, [{offset, "Z"}, {unit, microsecond}])),
+        send_message_respond_marker(Alice, Bob),
+        send_message_respond_marker(Alice, Bob),
+        AliceBJid = escalus_utils:jid_to_lower(escalus_client:short_jid(Alice)),
+        Iq = iq_fetch_marker([{<<"peer">>, AliceBJid}, {<<"after">>, BinTS}]),
+        escalus:send(Bob, Iq),
+        Response = escalus:wait_for_stanza(Bob),
+        escalus:assert(is_iq_result, [Iq], Response),
+        Marker = exml_query:path(Response, [{element_with_ns, <<"query">>, ?NS_ESL_SMART_MARKERS},
+                                            {element, <<"marker">>}]),
+        ?assertNotEqual(undefined, Marker),
+        ?assertNotEqual(undefined, exml_query:attr(Marker, <<"timestamp">>)),
+        ?assertEqual(<<"displayed">>, exml_query:attr(Marker, <<"type">>)),
+        ?assertEqual(undefined, exml_query:attr(Marker, <<"thread">>))
+    end).
+
+marker_after_timestamp_for_threadid_can_be_fetched(Config) ->
+    escalus:fresh_story(Config, [{alice, 1}, {bob, 1}], fun(Alice, Bob) ->
+        ThreadId = <<"some-thread-id">>,
+        TS = rpc(mim(), erlang, system_time, [microsecond]),
+        BinTS = list_to_binary(calendar:system_time_to_rfc3339(TS, [{offset, "Z"}, {unit, microsecond}])),
+        send_message_respond_marker(Alice, Bob),
+        send_message_respond_marker(Alice, Bob, ThreadId),
+        AliceBJid = escalus_utils:jid_to_lower(escalus_client:short_jid(Alice)),
+        Iq = iq_fetch_marker([{<<"peer">>, AliceBJid}, {<<"thread">>, ThreadId}, {<<"after">>, BinTS}]),
+        escalus:send(Bob, Iq),
+        Response = escalus:wait_for_stanza(Bob),
+        escalus:assert(is_iq_result, [Iq], Response),
+        Marker = exml_query:path(Response, [{element_with_ns, <<"query">>, ?NS_ESL_SMART_MARKERS},
+                                            {element, <<"marker">>}]),
+        ?assertNotEqual(undefined, Marker),
+        ?assertNotEqual(undefined, exml_query:attr(Marker, <<"timestamp">>)),
+        ?assertEqual(<<"displayed">>, exml_query:attr(Marker, <<"type">>)),
+        ?assertEqual(ThreadId, exml_query:attr(Marker, <<"thread">>))
     end).
 
 remove_markers_when_removed_user(Config) ->
@@ -214,20 +297,35 @@ one_marker_in_room(Users, RoomBinJid, Writer, Marker) ->
         [ escalus:wait_for_stanza(User) || User <- Users],
         ChatMarker = escalus_stanza:setattr(
                        escalus_stanza:chat_marker(RoomBinJid, <<"displayed">>, MsgId),
-                       <<"type">>, <<"groupchat">>),
+                       <<"type">>, <<"groupchat">>
+                      ),
         escalus:send(Marker, ChatMarker),
         [ escalus:wait_for_stanza(User) || User <- Users],
         MsgId.
 
 send_message_respond_marker(MsgWriter, MarkerAnswerer) ->
-    Body = <<"Hello">>,
+    send_message_respond_marker(MsgWriter, MarkerAnswerer, undefined).
+
+send_message_respond_marker(MsgWriter, MarkerAnswerer, MaybeThread) ->
     MsgId = escalus_stanza:id(),
-    Msg = escalus_stanza:set_id(escalus_stanza:chat_to(MarkerAnswerer, Body), MsgId),
+    Msg = add_thread_id(escalus_stanza:set_id(
+                          escalus_stanza:chat_to(MarkerAnswerer, <<"Hello!">>),
+                          MsgId),
+                        MaybeThread),
     escalus:send(MsgWriter, Msg),
     escalus:wait_for_stanza(MarkerAnswerer),
-    ChatMarker = escalus_stanza:chat_marker(MsgWriter, <<"displayed">>, MsgId),
+    ChatMarker = add_thread_id(escalus_stanza:chat_marker(
+                                 MsgWriter, <<"displayed">>, MsgId),
+                               MaybeThread),
     escalus:send(MarkerAnswerer, ChatMarker),
     escalus:wait_for_stanza(MsgWriter).
+
+add_thread_id(Msg, undefined) ->
+    Msg;
+add_thread_id(#xmlel{children = Children} = Msg, ThreadID) ->
+    ThreadEl = #xmlel{name = <<"thread">>,
+                      children = [#xmlcdata{content = ThreadID}]},
+    Msg#xmlel{children = [ThreadEl | Children]}.
 
 unregister_user(Client) ->
     Jid = jid:from_binary(escalus_client:short_jid(Client)),
