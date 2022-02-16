@@ -2,7 +2,7 @@
 %%% There is only one backend implementation (mnesia), so the backend module is global.
 -module(mod_bosh_backend).
 
--export([start/0,
+-export([start/1,
          create_session/1,
          delete_session/1,
          get_session/1,
@@ -27,9 +27,9 @@
 
 %% API Functions
 
--spec start() -> any().
-start() ->
-    mongoose_backend:init(global, ?MAIN_MODULE, [], #{backend => mnesia}),
+-spec start(gen_mod:module_opts()) -> any().
+start(Opts) ->
+    mongoose_backend:init(global, ?MAIN_MODULE, [], Opts),
     mongoose_backend:call(global, ?MAIN_MODULE, ?FUNCTION_NAME, []).
 
 -spec create_session(mod_bosh:session()) -> any().

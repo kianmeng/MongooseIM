@@ -81,12 +81,12 @@
 %%--------------------------------------------------------------------
 
 -spec start(mongooseim:host_type(), gen_mod:module_opts()) -> ok.
-start(_HostType, _Opts) ->
+start(_HostType, Opts) ->
     case mod_bosh_socket:is_supervisor_started() of
         true ->
             ok; % There is only one backend implementation (mnesia), so it is started globally
         false ->
-            mod_bosh_backend:start(),
+            mod_bosh_backend:start(Opts),
             {ok, _Pid} = mod_bosh_socket:start_supervisor(),
             ejabberd_hooks:add(node_cleanup, global, ?MODULE, node_cleanup, 50)
     end.
@@ -97,7 +97,9 @@ stop(_HostType) ->
 
 -spec config_spec() -> mongoose_config_spec:config_section().
 config_spec() ->
-    #section{items = #{<<"inactivity">> => #option{type = int_or_infinity,
+    #section{items = #{<<"backend">> => #option{type = atom,
+                                                validate = {module, mod_bosh}},
+                       <<"inactivity">> => #option{type = int_or_infinity,
                                                    validate = positive},
                        <<"max_wait">> => #option{type = int_or_infinity,
                                                  validate = positive},
@@ -105,7 +107,8 @@ config_spec() ->
                        <<"max_pause">> => #option{type = integer,
                                                   validate = positive}
                       },
-             defaults = #{<<"inactivity">> => 30, % seconds
+             defaults = #{<<"backend">> => mnesia,
+                          <<"inactivity">> => 30, % seconds
                           <<"max_wait">> => infinity, % seconds
                           <<"server_acks">> => false,
                           <<"max_pause">> => 120}, % seconds
@@ -449,7 +452,6 @@ maybe_set_max_hold(_, _) ->
 cowboy_reply(Code, Headers, Body, Req) when is_list(Headers) ->
     cowboy_req:reply(Code, maps:from_list(Headers), Body, Req).
 
--spec config_metrics(mongooseim:host_type()) -> [option()].
+-spec config_metrics(mongooseim:host_type()) -> [{gen_mod:opt_key(), gen_mod:opt_value()}].
 config_metrics(HostType) ->
-    OptsToReport = [{backend, mnesia}], %list of tuples {option, default_value}
-    mongoose_module_metrics:opts_for_module(HostType, ?MODULE, OptsToReport).
+    mongoose_module_metrics:opts_for_module(HostType, ?MODULE, [backend]).
