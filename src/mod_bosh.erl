@@ -311,10 +311,14 @@ maybe_start_session(Req, Body) ->
     Domain = exml_query:attr(Body, <<"to">>),
     case mongoose_domain_api:get_domain_host_type(Domain) of
         {ok, HostType} ->
-            maybe_start_session_on_known_host(HostType, Req, Body);
+            case gen_mod:is_loaded(HostType, ?MODULE) of
+                true ->
+                    maybe_start_session_on_known_host(HostType, Req, Body);
+                false ->
+                    {false, terminal_condition(<<"host-unknown">>, Req)}
+            end;
         {error, not_found} ->
-            Req1 = terminal_condition(<<"host-unknown">>, Req),
-            {false, Req1}
+            {false, terminal_condition(<<"host-unknown">>, Req)}
     end.
 
 -spec maybe_start_session_on_known_host(mongooseim:host_type(), req(), exml:element()) ->
